@@ -435,66 +435,65 @@ if len(X_test_orig) > 0:
         st.markdown("**What‑if analysis (counterfactual sliderboard)**")
         edited = instance_raw.copy()
         with st.form("what_if", clear_on_submit=False):
-    cols1, cols2 = st.columns(2)
+            cols1, cols2 = st.columns(2)
 
-    # Numeric controls
-    with cols1:
-        for col in [c for c in instance_raw.columns if c in numeric_cols]:
-            try:
-                base_val = instance_raw.iloc[0][col]
-                series = df[col].dropna() if col in df.columns else pd.Series([], dtype=float)
-                if series.empty:
-                    mn, mx = float(base_val) - 5.0, float(base_val) + 5.0
-                else:
-                    s = pd.to_numeric(series, errors="coerce").dropna()
-                    if s.empty:
-                        mn, mx = float(base_val) - 5.0, float(base_val) + 5.0
-                    else:
-                        q1 = float(s.quantile(0.01))
-                        q99 = float(s.quantile(0.99))
-                        if np.isfinite(q1) and np.isfinite(q99):
-                            mn, mx = q1, q99
-                        else:
+            # Numeric controls
+            with cols1:
+                for col in [c for c in instance_raw.columns if c in numeric_cols]:
+                    try:
+                        base_val = instance_raw.iloc[0][col]
+                        series = df[col].dropna() if col in df.columns else pd.Series([], dtype=float)
+                        if series.empty:
                             mn, mx = float(base_val) - 5.0, float(base_val) + 5.0
-                if mn == mx:
-                    mn, mx = mn - 1.0, mx + 1.0
-                if mn > mx:
-                    mn, mx = mx, mn
-                edited[col] = st.slider(f"{col}", min_value=float(mn), max_value=float(mx),
-                                        value=float(base_val), key=f"whatif_num_{col}")
-            except Exception as e:
-                st.warning(f"Could not render slider for **{col}**: {e}")
+                        else:
+                            s = pd.to_numeric(series, errors="coerce").dropna()
+                            if s.empty:
+                                mn, mx = float(base_val) - 5.0, float(base_val) + 5.0
+                            else:
+                                q1 = float(s.quantile(0.01))
+                                q99 = float(s.quantile(0.99))
+                                if np.isfinite(q1) and np.isfinite(q99):
+                                    mn, mx = q1, q99
+                                else:
+                                    mn, mx = float(base_val) - 5.0, float(base_val) + 5.0
+                        if mn == mx:
+                            mn, mx = mn - 1.0, mx + 1.0
+                        if mn > mx:
+                            mn, mx = mx, mn
+                        edited[col] = st.slider(f"{col}", min_value=float(mn), max_value=float(mx),
+                                                value=float(base_val), key=f"whatif_num_{col}")
+                    except Exception as e:
+                        st.warning(f"Could not render slider for **{col}**: {e}")
 
-    # Categorical controls
-    with cols2:
-        for col in [c for c in instance_raw.columns if c in categorical_cols]:
+            # Categorical controls
+            with cols2:
+                for col in [c for c in instance_raw.columns if c in categorical_cols]:
+                    try:
+                        series = df[col].dropna().astype(str) if col in df.columns else pd.Series([], dtype=str)
+                        choices = sorted(series.unique().tolist())
+                        current = str(instance_raw.iloc[0][col])
+                        if len(choices) == 0:
+                            choices = [current] if current not in ("", "nan", "None") else ["(missing)"]
+                        index_val = choices.index(current) if current in choices else 0
+                        edited[col] = st.selectbox(f"{col}", choices=choices, index=index_val, key=f"whatif_cat_{col}")
+                    except Exception as e:
+                        st.warning(f"Could not render selector for **{col}**: {e}")
+
+            submitted = st.form_submit_button("Recompute prediction")
+
+        if submitted:
             try:
-                series = df[col].dropna().astype(str) if col in df.columns else pd.Series([], dtype=str)
-                choices = sorted(series.unique().tolist())
-                current = str(instance_raw.iloc[0][col])
-                if len(choices) == 0:
-                    choices = [current] if current not in ("", "nan", "None") else ["(missing)"]
-                index_val = choices.index(current) if current in choices else 0
-                edited[col] = st.selectbox(f"{col}", choices=choices, index=index_val, key=f"whatif_cat_{col}")
+                Xe = preprocessor.transform(edited)
+                new_pred = baseline.predict(Xe)[0]
+                new_label = inverse_target_mapping[new_pred]
+                if hasattr(baseline, "predict_proba"):
+                    new_proba = float(baseline.predict_proba(Xe)[0][new_pred])
+                    st.success(f"**New prediction:** {new_label}  •  P={new_proba:.3f}")
+                else:
+                    st.success(f"**New prediction:** {new_label}")
+                st.caption("Compare with original to see which edits helped/hurt the favorable outcome.")
             except Exception as e:
-                st.warning(f"Could not render selector for **{col}**: {e}")
-
-    submitted = st.form_submit_button("Recompute prediction")
-
-if submitted:
-    try:
-        Xe = preprocessor.transform(edited)
-        new_pred = baseline.predict(Xe)[0]
-        new_label = inverse_target_mapping[new_pred]
-        if hasattr(baseline, "predict_proba"):
-            new_proba = float(baseline.predict_proba(Xe)[0][new_pred])
-            st.success(f"**New prediction:** {new_label}  •  P={new_proba:.3f}")
-        else:
-            st.success(f"**New prediction:** {new_label}")
-        st.caption("Compare with original to see which edits helped/hurt the favorable outcome.")
-    except Exception as e:
-        st.error(f"Failed to recompute prediction: {e}")
-# -----------------------------
+                st.error(f"Failed to recompute prediction: {e}")
 # 🩹 Bias mitigation via simple reweighing
 # -----------------------------
 st.subheader("🩹 Bias Mitigation (Reweighing + RandomForest)")
